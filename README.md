@@ -1,4 +1,4 @@
-# monitoring-functions
+# aws-monitoring-functions
 
 1. npm install in each sub package
 2. Zip the directory
