@@ -155,7 +155,7 @@ exports.handler = async (event) => {
     if (noBillings.length > 0) {
         const alertLines = [`EC2 instances with no Billing-tag found!\n`];
         noBillings.forEach(i => {
-            alertLines.push(`\`${i.id}\` (name: ${i.name}, type: ${i.type}, since: ${moment(i.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, region: ${i.region})`);
+            alertLines.push(`\`${i.name}\` (id: ${i.id}, type: ${i.type}, since: ${moment(i.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, region: ${i.region})`);
         });
         console.log(alertLines.join('\n'));
         if (event.postToSlack) {
