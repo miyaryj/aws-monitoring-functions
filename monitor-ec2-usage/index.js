@@ -36,7 +36,7 @@ async function checkInstances(region) {
     const ec2 = new AWS.EC2({apiVersion: '2016-11-15', region: region});
     const params = {
         Filters: [{
-            Name: "instance-state-name", 
+            Name: "instance-state-name",
             Values: [
                 "running"
             ]
@@ -69,7 +69,7 @@ async function checkInstances(region) {
             });
         });
     }
-    
+
     return result;
 }
 

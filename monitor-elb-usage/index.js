@@ -117,9 +117,9 @@ async function checkInstances(region) {
             }
         }
     }
-    
+
     result.instances = classicLbs.concat(lbs);
-    
+
     return result;
 }
 

@@ -53,7 +53,7 @@ async function checkInstances(region) {
             return setTags(rds, i.DBInstanceArn, instance);
         }));
     }
-    
+
     return result;
 }
 
