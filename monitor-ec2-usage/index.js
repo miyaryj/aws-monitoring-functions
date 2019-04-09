@@ -81,7 +81,7 @@ async function writeToS3(lines) {
     }
 
     await new Promise(function(resolve, reject) {
-        fs.writeFile('/tmp/tmp.txt', lines.join('\n'), function(err) {　
+        fs.writeFile('/tmp/tmp.txt', lines.join('\n'), function(err) {
             if (err) {
                 reject(err);
             } else {

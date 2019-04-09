@@ -102,7 +102,7 @@ async function setTags(sagemaker, arn, target) {
     const params = {
         ResourceArn : arn
     };
-    const response = await sagemaker.listTags(params).promise()
+    const response = await sagemaker.listTags(params).promise();
     response.Tags.forEach(t => {
         switch (t.Key) {
             case 'Billing':
@@ -121,7 +121,7 @@ async function writeToS3(lines) {
     }
 
     await new Promise(function(resolve, reject) {
-        fs.writeFile('/tmp/tmp.txt', lines.join('\n'), function(err) {　
+        fs.writeFile('/tmp/tmp.txt', lines.join('\n'), function(err) {
             if (err) {
                 reject(err);
             } else {

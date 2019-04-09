@@ -33,94 +33,43 @@ async function checkInstances(region) {
         instances: []
     };
 
-    // Classic
-    let classicLbs = [];
-    const elbClassic = new AWS.ELB({apiVersion: '2012-06-01', region: region});
+    const rds = new AWS.RDS({apiVersion: '2014-10-31', region: region});
 
     let params = {};
-    let response = await elbClassic.describeLoadBalancers(params).promise();
+    let response = await rds.describeDBInstances(params).promise();
     if (response.err) {
         console.log(response.err, response.err.stack);
     } else {
-        classicLbs = response.LoadBalancerDescriptions.map(lb => {
-            return {
-                name: lb.LoadBalancerName,
-                type: 'classic',
-                since: lb.CreatedTime,
+        result.instances = await Promise.all(response.DBInstances.filter(i => {
+            return i.DBInstanceStatus === 'available';
+        }).map(i => {
+            const instance = {
+                name: i.DBInstanceIdentifier,
+                type: i.DBInstanceClass,
+                since: i.InstanceCreateTime,
                 region: region
             };
-        });
-
-        if (classicLbs.length > 0) {
-            params = {
-                LoadBalancerNames: classicLbs.map(i => i.name)
-            };
-            response = await elbClassic.describeTags(params).promise();
-            if (response.err) {
-                console.log(response.err, response.err.stack);
-            } else {
-                response.TagDescriptions.forEach(description => {
-                    classicLbs.filter(i => i.name === description.LoadBalancerName).forEach(i => {
-                        description.Tags.forEach(t => {
-                            switch (t.Key) {
-                                case 'Billing':
-                                    i.billing = t.Value;
-                                    break;
-                            }
-                        });
-                    });
-                });
-            }
-        }
+            console.log(instance);
+            return setTags(rds, i.DBInstanceArn, instance);
+        }));
     }
-
-    // Application / Network
-    let lbs = [];
-    const elb = new AWS.ELBv2({apiVersion: '2015-12-01', region: region});
-
-    params = {};
-    response = await elb.describeLoadBalancers(params).promise();
-    if (response.err) {
-        console.log(response.err, response.err.stack);
-    } else {
-        lbs = response.LoadBalancers.filter(lb => {
-            return lb.State && lb.State.Code === 'active';
-        }).map(lb => {
-            return {
-                arn: lb.LoadBalancerArn,
-                name: lb.LoadBalancerName,
-                type: lb.Type,
-                since: lb.CreatedTime,
-                region: region
-            };
-        });
-
-        if (lbs.length > 0) {
-            params = {
-                ResourceArns: lbs.map(i => i.arn)
-            };
-            response = await elb.describeTags(params).promise();
-            if (response.err) {
-                console.log(response.err, response.err.stack);
-            } else {
-                response.TagDescriptions.forEach(description => {
-                    lbs.filter(i => i.arn === description.ResourceArn).forEach(i => {
-                        description.Tags.forEach(t => {
-                            switch (t.Key) {
-                                case 'Billing':
-                                    i.billing = t.Value;
-                                    break;
-                            }
-                        });
-                    });
-                });
-            }
-        }
-    }
-    
-    result.instances = classicLbs.concat(lbs);
     
     return result;
+}
+
+async function setTags(rds, arn, target) {
+    const params = {
+        ResourceName : arn
+    };
+    const response = await rds.listTagsForResource(params).promise();
+    response.TagList.forEach(t => {
+        switch (t.Key) {
+            case 'Billing':
+                target.billing = t.Value;
+                break;
+        }
+    });
+    return target;
 }
 
 async function writeToS3(lines) {
@@ -143,7 +92,7 @@ async function writeToS3(lines) {
     const s3 = new AWS.S3();
     const s3Params = {
         Bucket: bucket,
-        Key: `elb/elb_instances_${moment().format('YYYYMMDDHHmmss')}.csv`,
+        Key: `rds/rds_instances_${moment().format('YYYYMMDDHHmmss')}.csv`,
         Body: fs.readFileSync('/tmp/tmp.txt')
     };
     return s3.putObject(s3Params).promise();
@@ -203,7 +152,7 @@ exports.handler = async (event) => {
     }
 
     if (noBillings.length > 0) {
-        const alertLines = [`ELB instances with no Billing-tag found!\n`];
+        const alertLines = [`RDS instances with no Billing-tag found!\n`];
         noBillings.forEach(i => {
             alertLines.push(`\`${i.name}\` (type: ${i.type}, since: ${moment(i.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, region: ${i.region})`);
         });
