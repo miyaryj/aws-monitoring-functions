@@ -30,38 +30,42 @@ const UTC_OFFSET = 540;
 async function checkInstances(region) {
     const result = {
         region: region,
-        instances: []
+        tables: []
     };
 
-    const rds = new AWS.RDS({apiVersion: '2014-10-31', region: region});
+    const dynamodb = new AWS.DynamoDB({apiVersion: '2012-08-10', region: region});
 
     let params = {};
-    let response = await rds.describeDBInstances(params).promise();
+    let response = await dynamodb.listTables(params).promise();
     if (response.err) {
         console.log(response.err, response.err.stack);
     } else {
-        result.instances = await Promise.all(response.DBInstances.filter(i => {
-            return i.DBInstanceStatus === 'available';
-        }).map(i => {
-            const instance = {
-                name: i.DBInstanceIdentifier,
-                type: i.DBInstanceClass,
-                since: i.InstanceCreateTime,
+        result.tables = await Promise.all(response.TableNames.map(t => {
+            const table = {
+                name: t,
                 region: region
             };
-            return setTags(rds, i.DBInstanceArn, instance);
+            return setProperties(dynamodb, t, table);
         }));
     }
 
     return result;
 }
 
-async function setTags(rds, arn, target) {
-    const params = {
-        ResourceName : arn
+async function setProperties(dynamodb, name, target) {
+    let params = {
+        TableName : name
     };
-    const response = await rds.listTagsForResource(params).promise();
-    response.TagList.forEach(t => {
+    let response = await dynamodb.describeTable(params).promise();
+    target.rcu = response.Table.ProvisionedThroughput.ReadCapacityUnits;
+    target.wcu = response.Table.ProvisionedThroughput.WriteCapacityUnits;
+    target.since = response.Table.CreationDateTime;
+
+    params = {
+        ResourceArn : response.Table.TableArn
+    };
+    response = await dynamodb.listTagsOfResource(params).promise();
+    response.Tags.forEach(t => {
         switch (t.Key) {
             case 'Billing':
                 target.billing = t.Value;
@@ -91,7 +95,7 @@ async function writeToS3(lines) {
     const s3 = new AWS.S3();
     const s3Params = {
         Bucket: bucket,
-        Key: `rds/rds_instances_${moment().format('YYYYMMDDHHmmss')}.csv`,
+        Key: `dynamodb/dynamodb_tables_${moment().format('YYYYMMDDHHmmss')}.csv`,
         Body: fs.readFileSync('/tmp/tmp.txt')
     };
     return s3.putObject(s3Params).promise();
@@ -133,12 +137,12 @@ exports.handler = async (event) => {
     const regions = event.regions ? event.regions : REGIONS;
     const results = await Promise.all(regions.map(checkInstances));
 
-    const lines = ['name, billing, type, since, region'];
+    const lines = ['name, billing, rcu, wcu, since, region'];
     const noBillings = [];
-    results.filter(result => result.instances.length > 0).forEach(result => {
-        console.log(`${result.region}: ${result.instances.length}`);
-        result.instances.forEach(i => {
-            lines.push([i.name, i.billing, i.type, moment(i.since).utcOffset(UTC_OFFSET).format('YYYY/MM/DD'), i.region].join(','));
+    results.filter(result => result.tables.length > 0).forEach(result => {
+        console.log(`${result.region}: ${result.tables.length}`);
+        result.tables.forEach(i => {
+            lines.push([i.name, i.billing, i.rcu, i.wcu, moment(i.since).utcOffset(UTC_OFFSET).format('YYYY/MM/DD'), i.region].join(','));
             if (!i.billing) {
                 noBillings.push(i);
             }
@@ -151,9 +155,9 @@ exports.handler = async (event) => {
     }
 
     if (noBillings.length > 0) {
-        const alertLines = [`RDS instances with no Billing-tag found!\n`];
+        const alertLines = [`DynamoDB tables with no Billing-tag found!\n`];
         noBillings.forEach(i => {
-            alertLines.push(`\`${i.name}\` (type: ${i.type}, since: ${moment(i.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, region: ${i.region})`);
+            alertLines.push(`\`${i.name}\` (rcu: ${i.rcu}, wcu: ${i.wcu}, since: ${moment(i.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, region: ${i.region})`);
         });
         console.log(alertLines.join('\n'));
         if (event.postToSlack) {
