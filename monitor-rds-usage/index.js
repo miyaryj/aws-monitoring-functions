@@ -41,7 +41,8 @@ async function checkInstances(region) {
         console.log(response.err, response.err.stack);
     } else {
         result.instances = await Promise.all(response.DBInstances.filter(i => {
-            return i.DBInstanceStatus === 'available';
+            return i.DBInstanceStatus === 'available'
+                && i.Engine !== 'neptune';
         }).map(i => {
             const instance = {
                 name: i.DBInstanceIdentifier,
