@@ -160,30 +160,56 @@ async function checkAddresses(region) {
     };
 
     const ec2 = new AWS.EC2({apiVersion: '2016-11-15', region: region});
-    const params = {};
 
-    const response = await ec2.describeAddresses(params).promise();
-    if (response.err) {
-        console.log(response.err, response.err.stack);
-    } else {
-        response.Addresses.forEach(a => {
-            const address = {
-                publicIp: a.PublicIp,
-                associatedWith: a.InstanceId,
-                region: region
-            };
-            a.Tags.forEach(t => {
-                switch (t.Key) {
-                    case 'Name':
-                        address.name = t.Value;
-                        break;
-                    case 'Billing':
-                        address.billing = t.Value;
-                        break;
-                }
+    {
+        const params = {};
+        const response = await ec2.describeAddresses(params).promise();
+        if (response.err) {
+            console.log(response.err, response.err.stack);
+        } else {
+            result.addresses = response.Addresses.map(a => {
+                const address = {
+                    publicIp: a.PublicIp,
+                    associatedWith: a.InstanceId,
+                    region: region
+                };
+                a.Tags.forEach(t => {
+                    switch (t.Key) {
+                        case 'Name':
+                            address.name = t.Value;
+                            break;
+                        case 'Billing':
+                            address.billing = t.Value;
+                            break;
+                    }
+                });
+                return address;
             });
-            result.addresses.push(address);
-        });
+        }
+    }
+
+    if (result.addresses.some(a => a.associatedWith)) {
+        const params = {
+            InstanceIds: result.addresses.filter(a => a.associatedWith).map(a => a.associatedWith)
+        };
+        console.log(params);
+        const response = await ec2.describeInstances(params).promise();
+        if (response.err) {
+            console.log(response.err, response.err.stack);
+        } else {
+            response.Reservations.forEach(r => {
+                r.Instances.forEach(i => {
+                    result.addresses.find(a => a.associatedWith === i.InstanceId).associatedWithState = i.State.Name;
+                    i.Tags.forEach(t => {
+                        switch (t.Key) {
+                            case 'Name':
+                                result.addresses.find(a => a.associatedWith === i.InstanceId).associatedWithName = t.Value;
+                                break;
+                        }
+                    });
+                });
+            });
+        }
     }
 
     return result;
@@ -321,13 +347,13 @@ async function monitorEip(event, context) {
     const regions = event.regions ? event.regions : REGIONS;
     const results = await Promise.all(regions.map(checkAddresses));
 
-    const lines = ['publicIp,name,associatedWith,billing,region'];
+    const lines = ['publicIp,name,associatedWith,associatedWithName,associatedWithState,billing,region'];
     const noBillings = [];
     results.filter(result => result.addresses.length > 0).forEach(result => {
         console.log(`${result.region}: ${result.addresses.length}`);
         result.addresses.forEach(a => {
-            lines.push([a.publicIp, a.name, a.associatedWith, a.billing, a.region].join(','));
-            if (!a.billing && !a.associatedWith) {
+            lines.push([a.publicIp, a.name, a.associatedWith, a.associatedWithName, a.associatedWithState, a.billing, a.region].join(','));
+            if (!a.billing && (!a.associatedWith || a.associatedWithState !== 'running')) {
                 noBillings.push(a);
             }
         });
@@ -341,7 +367,8 @@ async function monitorEip(event, context) {
     if (noBillings.length > 0) {
         const alertLines = [`Unused Elastic IP with no Billing-tag found!\n`];
         noBillings.forEach(a => {
-            alertLines.push(`\`${a.name}\` (publicIp: ${a.publicIp}, region: ${a.region})`);
+            const associatedWith = a.associatedWith ? `${a.associatedWithName}(${a.associatedWith})` : 'none';
+            alertLines.push(`\`${a.name}\` (publicIp: ${a.publicIp}, associatedWith: ${associatedWith}, region: ${a.region})`);
         });
         console.log(alertLines.join('\n'));
         if (event.postToSlack) {
