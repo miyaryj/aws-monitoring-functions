@@ -2,6 +2,7 @@ const AWS = require('aws-sdk');
 const moment = require('moment');
 const request = require('request');
 const fs = require('fs');
+const prices = require('./instance-type-prices');
 
 const REGIONS = [
     'us-east-2',
@@ -65,6 +66,8 @@ async function checkInstances(region) {
                             break;
                     }
                 });
+                instance.pricePerHour = prices[instance.type];
+                instance.pricePerMonth = instance.pricePerHour * 24 * 30;
                 result.instances.push(instance);
             });
         });
@@ -135,14 +138,22 @@ exports.handler = async (event) => {
     const regions = event.regions ? event.regions : REGIONS;
     const results = await Promise.all(regions.map(checkInstances));
 
-    const lines = ['instanceId, name, billing, instanceType, since, region'];
+    const lines = ['instanceId,name,billing,instanceType,pricePerHour,pricePerMonth,since,region'];
     const noBillings = [];
+    const longRuns = [];
+    const longRunWhitelist = process.env['LONGRUN_WHITELIST'].split(',');
+    const current = moment();
     results.filter(result => result.instances.length > 0).forEach(result => {
         console.log(`${result.region}: ${result.instances.length}`);
         result.instances.forEach(i => {
-            lines.push([i.id, i.name, i.billing,i.type, moment(i.since).utcOffset(UTC_OFFSET).format('YYYY/MM/DD'), i.region].join(','));
+            lines.push([i.id, i.name, i.billing, i.type, i.pricePerHour, i.pricePerMonth, moment(i.since).utcOffset(UTC_OFFSET).format('YYYY/MM/DD'), i.region].join(','));
             if (!i.billing) {
                 noBillings.push(i);
+            }
+            if (i.pricePerHour >= 0.1 && current.diff(moment(i.since), 'day') >= 1) {
+                if (longRunWhitelist.indexOf(i.name) < 0) {
+                    longRuns.push(i);
+                }
             }
         });
     });
@@ -156,6 +167,17 @@ exports.handler = async (event) => {
         const alertLines = [`EC2 instances with no Billing-tag found!\n`];
         noBillings.forEach(i => {
             alertLines.push(`\`${i.name}\` (id: ${i.id}, type: ${i.type}, since: ${moment(i.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, region: ${i.region})`);
+        });
+        console.log(alertLines.join('\n'));
+        if (event.postToSlack) {
+            await postToSlack(alertLines);
+        }
+    }
+
+    if (longRuns.length > 0) {
+        const alertLines = [`Long-run EC2 instances (over 1 day & 0.1 USD/hour) found!\n`];
+        longRuns.forEach(i => {
+            alertLines.push(`\`${i.name}\` (id: ${i.id}, billing: ${i.billing}, type: ${i.type}, since: ${moment(i.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, region: ${i.region})`);
         });
         console.log(alertLines.join('\n'));
         if (event.postToSlack) {

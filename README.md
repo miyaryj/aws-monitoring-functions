@@ -21,4 +21,5 @@
 ### Environment Variables
 
 - `S3_BUCKET`: S3 bucket name to write CSV. requred if `writeToS3` is true
-- `SLACK_WEBHOOK_URL`: Slack webhook URL to post alerts (See Slack Incoming WebHooks integration). required if `postToSlack` is true 
+- `SLACK_WEBHOOK_URL`: Slack webhook URL to post alerts (See Slack Incoming WebHooks integration). required if `postToSlack` is true
+- `LONGRUN_WHITELIST`: Whitelist of instance name which will be ignored in long-run detection
