@@ -60,11 +60,15 @@ async function checkVolumes(region, accountId) {
                             break;
                     }
                 });
-                return findInstance(ec2, v.Attachments.map(a => a.InstanceId)).then(instances => {
-                    volume.attachedTo = instances.map(i => i.instanceId).join(',');
-                    volume.attachedToName = instances.map(i => i.name).join(',');
+                if (v.Attachments.length) {
+                    return findInstance(ec2, v.Attachments.map(a => a.InstanceId)).then(instances => {
+                        volume.attachedTo = instances.map(i => i.instanceId).join(',');
+                        volume.attachedToName = instances.map(i => i.name).join(',');
+                        return volume;
+                    });
+                } else {
                     return volume;
-                });
+                }
             }));
         }
     }
@@ -192,7 +196,6 @@ async function checkAddresses(region) {
         const params = {
             InstanceIds: result.addresses.filter(a => a.associatedWith).map(a => a.associatedWith)
         };
-        console.log(params);
         const response = await ec2.describeInstances(params).promise();
         if (response.err) {
             console.log(response.err, response.err.stack);
@@ -207,6 +210,32 @@ async function checkAddresses(region) {
                                 break;
                         }
                     });
+                });
+            });
+        }
+    }
+
+    if (result.addresses.length) {
+        const params = {};
+        const response = await ec2.describeNatGateways(params).promise();
+        if (response.err) {
+            console.log(response.err, response.err.stack);
+        } else {
+            response.NatGateways.forEach(ng => {
+                ng.NatGatewayAddresses.forEach(ngAddress => {
+                    result.addresses
+                        .filter(a => a.publicIp === ngAddress.PublicIp)
+                        .forEach(a => {
+                            a.associatedWith = ng.NatGatewayId;
+                            a.associatedWithState = 'running';
+                            ng.Tags.forEach(t => {
+                                switch (t.Key) {
+                                    case 'Name':
+                                        a.associatedWithName = t.Value;
+                                        break;
+                                }
+                            });
+                        });
                 });
             });
         }
@@ -321,7 +350,8 @@ async function monitorEbs(event, context) {
     if (agedVolumes.length > 0) {
         const alertLines = [`Old EBS volumes (over 2 years) found!\n`];
         agedVolumes.forEach(v => {
-            alertLines.push(`\`${v.name}\` (id: ${v.id}, billing: ${v.billing}, size: ${v.size}, since: ${moment(v.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, attachedTo: ${v.attachedToName}(${v.attachedTo}), region: ${v.region})`);
+            const attachedTo = v.attachedTo ? `${v.attachedToName}(${v.attachedTo})` : 'none';
+            alertLines.push(`\`${v.name}\` (id: ${v.id}, billing: ${v.billing}, size: ${v.size}, since: ${moment(v.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, attachedTo: ${attachedTo}, region: ${v.region})`);
         });
         console.log(alertLines.join('\n'));
         if (event.postToSlack) {
@@ -332,7 +362,8 @@ async function monitorEbs(event, context) {
     if (agedSnapshots.length > 0) {
         const alertLines = [`Old EBS snapshots (over 3 years) found!\n`];
         agedSnapshots.forEach(v => {
-            alertLines.push(`\`${v.name}\` (id: ${v.id}, billing: ${v.billing}, size: ${v.size}, since: ${moment(v.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, attachedTo: ${v.attachedToName}(${v.attachedTo}), region: ${v.region})`);
+            const attachedTo = v.attachedTo ? `${v.attachedToName}(${v.attachedTo})` : 'none';
+            alertLines.push(`\`${v.name}\` (id: ${v.id}, billing: ${v.billing}, size: ${v.size}, since: ${moment(v.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, attachedTo: ${attachedTo}, region: ${v.region})`);
         });
         console.log(alertLines.join('\n'));
         if (event.postToSlack) {
