@@ -2,7 +2,12 @@ const AWS = require('aws-sdk');
 const moment = require('moment');
 const request = require('request');
 const fs = require('fs');
-const prices = require('./instance-type-prices');
+const instanceTable = require('./region-instances');
+
+const priceArray = Object.values(instanceTable.regions["US East (N. Virginia)"]).map(value => {
+    return [value["Instance Type"], Number(value.price)];
+});
+const prices = Object.fromEntries(priceArray);
 
 const REGIONS = [
     'us-east-2',
