@@ -73,27 +73,33 @@ async function checkInstances(region) {
             }
         }
     }
+    result.instances = classicLbs;
 
     // Application / Network
     let lbs = [];
     const elb = new AWS.ELBv2({apiVersion: '2015-12-01', region: region});
 
-    params = {};
-    response = await elb.describeLoadBalancers(params).promise();
-    if (response.err) {
-        console.log(response.err, response.err.stack);
-    } else {
-        lbs = response.LoadBalancers.filter(lb => {
-            return lb.State && lb.State.Code === 'active';
-        }).map(lb => {
-            return {
-                arn: lb.LoadBalancerArn,
-                name: lb.LoadBalancerName,
-                type: lb.Type,
-                since: lb.CreatedTime,
-                region: region
-            };
-        });
+    let marker = undefined;
+    do {
+        params = { PageSize: 20, Marker: marker };
+        response = await elb.describeLoadBalancers(params).promise();
+        if (response.err) {
+            console.log(response.err, response.err.stack);
+            break;
+        } else {
+            lbs = response.LoadBalancers.filter(lb => {
+                return lb.State && lb.State.Code === 'active';
+            }).map(lb => {
+                return {
+                    arn: lb.LoadBalancerArn,
+                    name: lb.LoadBalancerName,
+                    type: lb.Type,
+                    since: lb.CreatedTime,
+                    region: region
+                };
+            });
+        }
+        marker = response.NextMarker;
 
         if (lbs.length > 0) {
             params = {
@@ -116,9 +122,9 @@ async function checkInstances(region) {
                 });
             }
         }
-    }
 
-    result.instances = classicLbs.concat(lbs);
+        result.instances = result.instances.concat(lbs);
+    } while (marker);
 
     return result;
 }
