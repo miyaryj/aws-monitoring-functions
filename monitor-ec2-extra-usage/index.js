@@ -347,29 +347,29 @@ async function monitorEbs(event, context) {
     //     }
     // }
 
-    if (agedVolumes.length > 0) {
-        const alertLines = [`Old EBS volumes (over 2 years) found!\n`];
-        agedVolumes.forEach(v => {
-            const attachedTo = v.attachedTo ? `${v.attachedToName}(${v.attachedTo})` : 'none';
-            alertLines.push(`\`${v.name}\` (id: ${v.id}, billing: ${v.billing}, size: ${v.size}, since: ${moment(v.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, attachedTo: ${attachedTo}, region: ${v.region})`);
-        });
-        console.log(alertLines.join('\n'));
-        if (event.postToSlack) {
-            await postToSlack(alertLines);
-        }
-    }
+    // if (agedVolumes.length > 0) {
+    //     const alertLines = [`Old EBS volumes (over 2 years) found!\n`];
+    //     agedVolumes.forEach(v => {
+    //         const attachedTo = v.attachedTo ? `${v.attachedToName}(${v.attachedTo})` : 'none';
+    //         alertLines.push(`\`${v.name}\` (id: ${v.id}, billing: ${v.billing}, size: ${v.size}, since: ${moment(v.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, attachedTo: ${attachedTo}, region: ${v.region})`);
+    //     });
+    //     console.log(alertLines.join('\n'));
+    //     if (event.postToSlack) {
+    //         await postToSlack(alertLines);
+    //     }
+    // }
 
-    if (agedSnapshots.length > 0) {
-        const alertLines = [`Old EBS snapshots (over 3 years) found!\n`];
-        agedSnapshots.forEach(v => {
-            const attachedTo = v.attachedTo ? `${v.attachedToName}(${v.attachedTo})` : 'none';
-            alertLines.push(`\`${v.name}\` (id: ${v.id}, billing: ${v.billing}, size: ${v.size}, since: ${moment(v.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, attachedTo: ${attachedTo}, region: ${v.region})`);
-        });
-        console.log(alertLines.join('\n'));
-        if (event.postToSlack) {
-            await postToSlack(alertLines);
-        }
-    }
+    // if (agedSnapshots.length > 0) {
+    //     const alertLines = [`Old EBS snapshots (over 3 years) found!\n`];
+    //     agedSnapshots.forEach(v => {
+    //         const attachedTo = v.attachedTo ? `${v.attachedToName}(${v.attachedTo})` : 'none';
+    //         alertLines.push(`\`${v.name}\` (id: ${v.id}, billing: ${v.billing}, size: ${v.size}, since: ${moment(v.since).utcOffset(UTC_OFFSET).format('YYYY-MM-DD')}, attachedTo: ${attachedTo}, region: ${v.region})`);
+    //     });
+    //     console.log(alertLines.join('\n'));
+    //     if (event.postToSlack) {
+    //         await postToSlack(alertLines);
+    //     }
+    // }
 
     return results;
 }
