@@ -27,6 +27,9 @@ const REGIONS = [
 
 const UTC_OFFSET = 540;
 
+const CPU_PRICE_PER_HOUR = 0.04048;
+const MEMORY_PRICE_PER_HOUR = 0.004445;
+
 async function checkTasks(region) {
     const result = {
         region: region,
@@ -72,7 +75,7 @@ async function checkClusterTasks(ecs, cluster, region) {
             return [];
         }
         const tasks = response.tasks.map(t => {
-            return {
+            const task = {
                 arn: t.taskArn,
                 name: t.taskDefinitionArn.split("/")[1],
                 cluster: cluster,
@@ -82,6 +85,9 @@ async function checkClusterTasks(ecs, cluster, region) {
                 since: t.startedAt,
                 region: region
             };
+            task.pricePerHour = (task.cpu/1024) * CPU_PRICE_PER_HOUR + (task.memory/1024) * MEMORY_PRICE_PER_HOUR;
+            task.pricePerMonth = task.pricePerHour * 24 * 30;
+            return task;
         });
         await Promise.all(tasks.map(t => setTags(ecs, t)));
         return tasks;
@@ -167,12 +173,12 @@ exports.handler = async (event) => {
     const regions = event.regions ? event.regions : REGIONS;
     const results = await Promise.all(regions.map(checkTasks));
 
-    const lines = ['name, cluster, billing, type, cpu, memory, since, region'];
+    const lines = ['name, cluster, billing, type, cpu, memory, pricePerHour, pricePerMonth, since, region'];
     const noBillings = [];
     results.filter(result => result.tasks.length > 0).forEach(result => {
         console.log(`${result.region}: ${result.tasks.length}`);
         result.tasks.forEach(x => {
-            lines.push([x.name, x.cluster, x.billing, x.type, x.cpu, x.memory, moment(x.since).utcOffset(UTC_OFFSET).format('YYYY/MM/DD'), x.region].join(','));
+            lines.push([x.name, x.cluster, x.billing, x.type, x.cpu, x.memory, x.pricePerHour, x.pricePerMonth, moment(x.since).utcOffset(UTC_OFFSET).format('YYYY/MM/DD'), x.region].join(','));
             if (x.type === "FARGATE" && !x.billing) {
                 noBillings.push(x);
             }
