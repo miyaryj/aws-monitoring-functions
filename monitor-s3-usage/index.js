@@ -60,7 +60,10 @@ async function setBucketProperties(s3, bucket) {
             }
         }
     } catch (e) {
-        if (e.name !== "NoSuchTagSet") console.log("Error in getBucketTagging: " + bucket.name, e);
+        if (e.name !== "NoSuchTagSet") {
+            console.log("Error in getBucketTagging: " + bucket.name, e);
+            bucket.billing = e.name;
+        }
     }
     
     try {
@@ -72,6 +75,7 @@ async function setBucketProperties(s3, bucket) {
         }
     } catch (e) {
         console.log("Error in getBucketVersioning: " + bucket.name, e);
+        bucket.versioning = e.name;
     }
     
     try {
@@ -79,14 +83,26 @@ async function setBucketProperties(s3, bucket) {
         if (response.err) {
             console.log(response.err, response.err.stack);
         } else {
+            bucket.lifecycleRulesObj = response.Rules;
             bucket.lifecycleRules = response.Rules.filter(r => r.Status === "Enabled").map(r => {
                 return Object.keys(r).filter(k => {
-                    return k.endsWith("Expiration") || k.endsWith("Transitions") || k === "AbortIncompleteMultipartUpload";
+                    if (k.endsWith("Expiration")) {
+                        return "Date" in r[k] || "Days" in r[k] || "NoncurrentDays" in r[k];
+                    } else if (k.endsWith("Transitions")) {
+                        return r[k].length;
+                    } else if (k === "AbortIncompleteMultipartUpload") {
+                        return Object.keys(r[k]).length;
+                    } else {
+                        return false;
+                    }
                 }).join("|");
             }).join("|");
         }
     } catch (e) {
-        if (e.name !== "NoSuchLifecycleConfiguration") console.log("Error in getBucketLifecycleConfiguration: " + bucket.name, e);
+        if (e.name !== "NoSuchLifecycleConfiguration") {
+            console.log("Error in getBucketLifecycleConfiguration: " + bucket.name, e);
+            bucket.lifecycleRules = e.name;
+        }
     }
 }
 
@@ -132,6 +148,49 @@ async function setBucketSize(cloudwatch, bucket, startTime, endTime) {
         console.log(response.err, response.err.stack);
     } else {
         bucket.bucketSizeBytes = response.MetricDataResults[0] ? response.MetricDataResults[0].Values[0] : null;
+    }
+}
+
+async function putBucketsMpuRules(buckets) {
+    const s3 = new AWS.S3({ apiVersion: '2006-03-01' });
+
+    await Promise.all(buckets.map(b => putBucketMpuRules(s3, b)));
+}
+
+async function putBucketMpuRules(s3, bucket) {
+    const lifecycleRules = bucket.lifecycleRulesObj || [];
+    lifecycleRules.forEach(r => {
+        if (r.Prefix) {
+            r.Filter = { Prefix: r.Prefix };
+            delete r.Prefix;
+        }
+    });
+    lifecycleRules.push({
+        Expiration: {
+            ExpiredObjectDeleteMarker: false
+        },
+        ID: "aurora-abort-mpu",
+        Filter: {},
+        Status: "Enabled",
+        Transitions: [],
+        NoncurrentVersionTransitions: [],
+        AbortIncompleteMultipartUpload: {
+            DaysAfterInitiation: 7
+        }
+    });
+    const params = {
+        Bucket: bucket.name,
+        LifecycleConfiguration: {
+            Rules: lifecycleRules
+        }
+    };
+    try {
+        const response = await s3.putBucketLifecycleConfiguration(params).promise();
+        if (response.err) {
+            console.log(response.err, response.err.stack);
+        }
+    } catch (e) {
+        console.log("Error in putBucketLifecycleConfiguration: " + bucket.name, e);
     }
 }
 
@@ -198,12 +257,17 @@ exports.handler = async (event) => {
 
     const lines = ['name, billing, versioning, lifecycleRules, bucketSizeBytes, region'];
     const noBillings = [];
+    const noMpuRule = [];
     results.filter(result => result.buckets.length > 0).forEach(result => {
         console.log(`${result.region}: ${result.buckets.length}`);
         result.buckets.forEach(b => {
             lines.push([b.name, b.billing, b.versioning, b.lifecycleRules, b.bucketSizeBytes, b.region].join(','));
-            if (!b.billing) {
+            if (!b.billing && b.billing !== "AccessDenied") {
                 noBillings.push(b);
+            }
+            if ((!b.lifecycleRules || b.lifecycleRules.split("|").every(r => r !== "AbortIncompleteMultipartUpload")) &&
+                    b.billing !== "AccessDenied") {
+                noMpuRule.push(b);
             }
         });
     });
@@ -211,6 +275,17 @@ exports.handler = async (event) => {
     console.log(lines.join('\n'));
     if (event.writeToS3) {
         await writeToS3(lines);
+    }
+
+    if (noMpuRule.length > 0) {
+        const alertLines = [`S3 buckets with no AbortIncompleteMultipartUpload lifecycleRule found!\n`];
+        noMpuRule.forEach(b => {
+            alertLines.push(`\`${b.name}\` (billing: ${b.billing}, lifecycleRules: ${b.lifecycleRules}, region: ${b.region})`);
+        });
+        console.log(alertLines.join('\n'));
+        if (event.putMpuRules) {
+            await putBucketsMpuRules(noMpuRule);
+        }
     }
 
     const response = {
